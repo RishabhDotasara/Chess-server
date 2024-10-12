@@ -11,20 +11,14 @@ const server = http.createServer(app);
 
 export const io = new Server(server, {
   cors: {
-    origin: "http://192.168.32.91:3000", // Replace with your frontend URL
+    origin: ["http://localhost:3000", "https://chess-iota-taupe.vercel.app/"], // Replace with your frontend URL
     methods: ["GET", "POST"],
     allowedHeaders: ["my-custom-header"],
     credentials: true,
   },
 });
 
-const redisClient = createClient({
-  password: "QjGptgXC35XYv1XMQ9WxiMo34Pib03Rf",
-  socket: {
-    host: "redis-14055.c80.us-east-1-2.ec2.redns.redis-cloud.com",
-    port: 14055,
-  },
-});
+
 
 //sokcetID is the player Id after all, just name not changes yet
 interface Player {
@@ -140,8 +134,6 @@ io.on("connection", (socket) => {
       games_in_progress: STATS.games_in_progress,
     });
   });
-
-  
 
   //handle room join event
   socket.on("join-room", (data: { gameID: string }) => {
