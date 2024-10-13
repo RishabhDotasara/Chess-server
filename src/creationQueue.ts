@@ -1,56 +1,30 @@
-import Bull from "bull";
 import { Game, GAME_TIME, GAMES, io, PLAYER_MAP, STATS, Stats } from "./server";
 import { Chess } from "chess.js";
 import dotenv from "dotenv";
+import { Job } from "./types";
+import { SimpleQueue } from "./simpleQueue";
 
 dotenv.config();
 
-// "redis-13067.c330.asia-south1-1.gce.redns.redis-cloud.com"
-// 13067,
 // Create a new queue
-const gameQueue = new Bull("gameQueue", {
-  redis: {
-    host: "redis-13067.c330.asia-south1-1.gce.redns.redis-cloud.com",
-    port: 13067,
-    password: "tILQgdfjIVpjPPoWI7KnYfKHNkyyX6MA",
-  },
-});
-
-// Log any errors
-gameQueue.on("error", (error) => {
-  console.error("[REDIS ERROR]: ", error);
-});
-
-// Log when the queue is ready
-gameQueue.on("ready", () => {
-  console.log("Game Queue is ready.");
-});
-
-gameQueue.empty().then(()=>{
-  console.log("Game Queue CLeared!")
-})
-// Process the queue
-gameQueue.process(async (job) => {
-  const { playerId } = job.data;
+const gameQueue = new SimpleQueue("gameQueue", async (job: Job) => {
+  // @ts-ignore
+  const { playerId } = job.job;
   console.log(`[START] Processing job for playerId: ${playerId}`);
 
-  // Fetch waiting jobs and delayed jobs
-  const waitingJobs = await gameQueue.getWaiting();
-  const delayedJobs = await gameQueue.getDelayed();
-  console.log(`Waiting jobs: ${waitingJobs.length}, Delayed jobs: ${delayedJobs.length}`);
-
-  // Check if there are waiting jobs available
-  if (waitingJobs.length > 0 || delayedJobs.length > 0) {
-    // Pick the first waiting job
-    const nextJob = waitingJobs.length>0 ?  waitingJobs[0] : delayedJobs[0];
-    const { playerId: nextPlayerId } = nextJob.data;
+  // Check if there are other jobs waiting in the queue
+  // console.log(gameQueue.queue)
+  if (gameQueue.queue.length > 0) {
+    const nextJob = await gameQueue.pop();  // Get the next job
+    // @ts-ignore
+    const { playerId: nextPlayerId } = nextJob.job;
 
     console.log(`[MATCH] Matching ${playerId} with ${nextPlayerId}`);
-    
+
     // Prevent matching the same player
     if (playerId === nextPlayerId) {
       console.log(`[NO MATCH] Player cannot match with themselves: ${playerId}`);
-      return; // Exit early if trying to match with oneself
+      return;  // Exit early if trying to match with oneself
     }
 
     const roomId = await getRandomId(9);
@@ -72,10 +46,6 @@ gameQueue.process(async (job) => {
     GAMES.push(newGame);
     console.log(`[GAME CREATED] Game between ${playerId} and ${nextPlayerId}`);
 
-    // Remove the matched job from the queue
-    await nextJob.remove();
-    console.log(`[REMOVE] Removed job for ${nextPlayerId}`);
-
     // Notify both players
     if (PLAYER_MAP[playerId]) {
       io.to(PLAYER_MAP[playerId]).emit("game-created", { roomId, opponent: nextPlayerId });
@@ -84,15 +54,13 @@ gameQueue.process(async (job) => {
       io.to(PLAYER_MAP[nextPlayerId]).emit("game-created", { roomId, opponent: playerId });
     }
   } else {
-    console.log(`[NO MATCH] No players to match. Adding back to the queue.`);
-    // Add player back to queue with a delay and without changing the priority
-    await gameQueue.add({ playerId }, { delay: 3000 });
+    console.log(`[NO MATCH] No players to match.`);
+    await gameQueue.add({playerId:playerId})
+    gameQueue.isProcessing = false;
   }
 
   console.log(`[END] Finished processing for playerId: ${playerId}`);
 });
-
-
 
 // Utility function to generate a random ID
 async function getRandomId(length: number): Promise<string> {

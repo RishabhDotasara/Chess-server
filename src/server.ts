@@ -67,36 +67,39 @@ app.use(express.urlencoded({ extended: true }));
 app.use(cors());
 
 app.get("/", (req, res) => {
-  res.send("Socket.IO server running");
+  res.send("server running");
 });
 
 // Create a new game room
 app.post("/find-match", async (req, res) => {
   try {
-   
     const body: { playerId: string } = req.body;
 
     // Log the incoming request for better debugging
-    console.log(`[${new Date().toISOString()}] Received match request for player ID: ${body.playerId}`);
-    
-    // Add the player to the game queue
-    const existingJobs = await gameQueue.getJobs(['waiting', 'active', 'delayed']);
-    const jobExists = existingJobs.some(job => job.data.playerId === body.playerId);
+    console.log(
+      `[${new Date().toISOString()}] Received match request for player ID: ${
+        body.playerId
+      }`
+    );
+
+    const jobExists = false;
 
     if (!jobExists) {
-      await gameQueue.add({ playerId: body.playerId }, { delay: 1000 });
-      console.log(`[${new Date().toISOString()}] Player ID ${body.playerId} added to the queue.`);
+      await gameQueue.add({ playerId: body.playerId });
+      console.log(
+        `[${new Date().toISOString()}] Player ID ${
+          body.playerId
+        } added to the queue.`
+        ,
+        gameQueue.queue
+      );
     } else {
-      console.log(`[${new Date().toISOString()}] Player ID ${body.playerId} is already in the queue.`);
+      console.log(
+        `[${new Date().toISOString()}] Player ID ${
+          body.playerId
+        } is already in the queue.`
+      );
     }
-    
-    const isPaused = await gameQueue.isPaused();
-    if (isPaused) {
-      await gameQueue.resume();
-      console.log(`[${new Date().toISOString()}] Resumed the game queue.`);
-    }
-
-    console.log("Jobs: ", await gameQueue.getJobCounts());
 
     // Update stats and emit to clients
     const newStats: Stats = {
@@ -135,7 +138,9 @@ io.on("connection", (socket) => {
   socket.on("map-data", (data: { playerId: string; user: {} }) => {
     PLAYER_MAP[data.playerId] = socket.id;
     PLAYER_DATA[socket.id] = data.user;
-    console.log(`Player ${data.playerId} registered with socket ID ${socket.id}`);
+    console.log(
+      `Player ${data.playerId} registered with socket ID ${socket.id}`
+    );
     console.log(PLAYER_MAP);
     io.emit("update-stats", {
       online_players: STATS.online_players,
@@ -147,61 +152,83 @@ io.on("connection", (socket) => {
   // Handle room join event
   socket.on("join-room", (data: { gameID: string }) => {
     console.log(`[JOIN REQUEST] ROOMID: ${data.gameID}`);
-    const game: Game = GAMES.find((game: Game) => game.gameId == data.gameID) as Game;
+    const game: Game = GAMES.find(
+      (game: Game) => game.gameId == data.gameID
+    ) as Game;
     // console.log(game.players);
     socket.join(game.gameId);
 
     // Fire back the welcome event
     socket.emit("handshake-done", {
-      color: game.players.find((player: Player) => player.socketId == socket.id)?.color,
+      color: game.players.find((player: Player) => player.socketId == socket.id)
+        ?.color,
       position: game?.game.fen(),
     });
   });
 
   // GAME EVENTS
   // Make move
-  socket.on("make-move", (data: { roomId: string; from: string; to: string; color: string; time: number; }) => {
-    console.log(data);
-    try {
-      const game = GAMES.find((game: Game) => game.gameId == data.roomId);
-      if (data.color != game?.game.turn()) {
-        return;
-      }
+  socket.on(
+    "make-move",
+    (data: {
+      roomId: string;
+      from: string;
+      to: string;
+      color: string;
+      time: number;
+    }) => {
+      console.log(data);
+      try {
+        const game = GAMES.find((game: Game) => game.gameId == data.roomId);
+        if (data.color != game?.game.turn()) {
+          return;
+        }
 
-      // Push the last fen to the moves array to be used for replay.
-      game.moves.push(game.game.fen());
+        // Push the last fen to the moves array to be used for replay.
+        game.moves.push(game.game.fen());
 
-      const move = game?.game.move({ from: data.from, to: data.to });
+        const move = game?.game.move({ from: data.from, to: data.to });
 
-      if (move != null) {
-        const newFEN = game?.game.fen();
+        if (move != null) {
+          const newFEN = game?.game.fen();
 
-        // Set the timestamps you got from the player
-        if (game && game.timestamps) {
-          if (data.color == "w") {
-            game.timestamps.whiteTime = data.time;
-          } else {
-            game.timestamps.blackTime = data.time;
+          // Set the timestamps you got from the player
+          if (game && game.timestamps) {
+            if (data.color == "w") {
+              game.timestamps.whiteTime = data.time;
+            } else {
+              game.timestamps.blackTime = data.time;
+            }
           }
-        }
 
-        // Check for game end conditions
-        if (game.game.isCheckmate()) {
-          io.to(data.roomId).emit("game-over", { result: GAME_END_TYPE.CHECKMATE, winner: data.color });
-        } else if (game?.game.isStalemate()) {
-          io.to(data.roomId).emit("game-over", { result: GAME_END_TYPE.STALEMATE });
-        } else if (game?.game.isDraw()) {
-          io.to(data.roomId).emit("game-over", { result: GAME_END_TYPE.AUTO_DRAW });
+          // Check for game end conditions
+          if (game.game.isCheckmate()) {
+            io.to(data.roomId).emit("game-over", {
+              result: GAME_END_TYPE.CHECKMATE,
+              winner: data.color,
+            });
+          } else if (game?.game.isStalemate()) {
+            io.to(data.roomId).emit("game-over", {
+              result: GAME_END_TYPE.STALEMATE,
+            });
+          } else if (game?.game.isDraw()) {
+            io.to(data.roomId).emit("game-over", {
+              result: GAME_END_TYPE.AUTO_DRAW,
+            });
+          } else {
+            io.to(data.roomId).emit("position-change", {
+              newFEN,
+              time: game?.timestamps,
+            });
+          }
         } else {
-          io.to(data.roomId).emit("position-change", { newFEN, time: game?.timestamps });
+          socket.emit("invalid-move");
         }
-      } else {
-        socket.emit("invalid-move");
+      } catch (err) {
+        console.log(err);
       }
-    } catch (err) {
-      console.log(err);
     }
-  });
+  );
 
   // Game start
   socket.on("start-game", (data: { gameId: string }) => {
@@ -217,7 +244,9 @@ io.on("connection", (socket) => {
   // Draw
   socket.on("draw", (data: { gameId: string; playerColor: string }) => {
     const game = GAMES.find((game: Game) => game.gameId == data.gameId);
-    const playerToAsk = game?.players.find((player: Player) => player.socketId != socket.id)?.socketId as string;
+    const playerToAsk = game?.players.find(
+      (player: Player) => player.socketId != socket.id
+    )?.socketId as string;
     io.to(playerToAsk).emit("alert", { type: GAME_END_TYPE.DRAW });
     socket.on("draw-answer", (data: { answer: boolean }) => {
       console.log(data);
@@ -240,11 +269,17 @@ io.on("connection", (socket) => {
     );
 
     if (game) {
-      game.players = game.players.filter((player: Player) => player.socketId !== socket.id);
-      console.log(`Player with socket ID ${socket.id} removed from game ${game.gameId}`);
+      game.players = game.players.filter(
+        (player: Player) => player.socketId !== socket.id
+      );
+      console.log(
+        `Player with socket ID ${socket.id} removed from game ${game.gameId}`
+      );
 
       if (game.players?.length === 0) {
-        console.log(`No players left in game ${game.gameId}. Game is stopping.`);
+        console.log(
+          `No players left in game ${game.gameId}. Game is stopping.`
+        );
         console.log(GAMES);
       }
     } else {
@@ -254,7 +289,7 @@ io.on("connection", (socket) => {
 });
 
 // Start the server
-const PORT =  4000;
+const PORT = 4000;
 server.listen(PORT, () => {
   console.log(`Server is running on port ${PORT}`);
 });
