@@ -10,8 +10,8 @@ dotenv.config();
 // Create a new queue
 const gameQueue = new Bull("gameQueue", {
   redis: {
-    host: "localhost",
-    port: 6379,
+    host: "redis-13067.c330.asia-south1-1.gce.redns.redis-cloud.com",
+    port: 13067,
     // password: "tILQgdfjIVpjPPoWI7KnYfKHNkyyX6MA",
   },
 });
