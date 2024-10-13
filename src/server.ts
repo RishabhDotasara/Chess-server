@@ -73,7 +73,7 @@ app.get("/", (req, res) => {
 // Create a new game room
 app.post("/find-match", async (req, res) => {
   try {
-    // Define the types separately if using TypeScript
+   
     const body: { playerId: string } = req.body;
 
     // Log the incoming request for better debugging
@@ -148,7 +148,7 @@ io.on("connection", (socket) => {
   socket.on("join-room", (data: { gameID: string }) => {
     console.log(`[JOIN REQUEST] ROOMID: ${data.gameID}`);
     const game: Game = GAMES.find((game: Game) => game.gameId == data.gameID) as Game;
-    console.log(game.players);
+    // console.log(game.players);
     socket.join(game.gameId);
 
     // Fire back the welcome event
