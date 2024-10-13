@@ -12,7 +12,7 @@ const gameQueue = new Bull("gameQueue", {
   redis: {
     host: "redis-13067.c330.asia-south1-1.gce.redns.redis-cloud.com",
     port: 13067,
-    // password: "tILQgdfjIVpjPPoWI7KnYfKHNkyyX6MA",
+    password: "tILQgdfjIVpjPPoWI7KnYfKHNkyyX6MA",
   },
 });
 
