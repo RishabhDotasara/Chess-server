@@ -1,7 +1,7 @@
-import { Game, GAME_TIME, GAMES, io, PLAYER_MAP, STATS, Stats } from "./server";
+import {GAME_TIME, GAMES, io, PLAYER_MAP, STATS} from "./server";
 import { Chess } from "chess.js";
 import dotenv from "dotenv";
-import { Job } from "./types";
+import { Game, Job } from "./types";
 import { SimpleQueue } from "./simpleQueue";
 
 dotenv.config();

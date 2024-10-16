@@ -47,9 +47,9 @@ class SimpleQueue {
     this.isProcessing = false;
   }
 
-  async isExist(job:{[key:string]:string})
+  async isExist(playerId:string)
   {
-    return this.queue.some((queuedJob: Job) => JSON.stringify(queuedJob.job) === JSON.stringify(job));
+    return this.queue.find((job:any)=>job.playerId==playerId);
   }
 
 }

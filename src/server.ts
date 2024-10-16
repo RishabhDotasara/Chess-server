@@ -1,54 +1,23 @@
 import express from "express";
 import http from "http";
-import { Server } from "socket.io";
+import { Server, Socket } from "socket.io";
 import cors from "cors";
 import { Chess } from "chess.js";
 import { createClient } from "redis";
 import { gameQueue } from "./creationQueue";
+import { Game, Stats, Player, CustomSocket } from "./types";
+import { handleGame } from "./gameSocket";
 
 const app = express();
 const server = http.createServer(app);
 
 export const io = new Server(server, {
   cors: {
-    origin: ["http://localhost:3000", "https://chess-iota-taupe.vercel.app/"], // Replace with your frontend URL
+    origin: ["http://localhost:3000", "https://chess-iota-taupe.vercel.app"], // Replace with your frontend URL
   },
 });
 
 // Socket ID is the player Id after all; just the name not changed yet
-interface Player {
-  socketId: string;
-  playerId?: string;
-  color: string;
-  username?: string;
-  image?: string;
-}
-
-export interface Game {
-  gameId: string;
-  game: Chess;
-  players: Player[];
-  moves: string[];
-  turn: string;
-  timestamps: {
-    blackTime: number;
-    whiteTime: number;
-  };
-}
-
-export enum GAME_END_TYPE {
-  "RESIGN",
-  "DRAW",
-  "STALEMATE",
-  "CHECKMATE",
-  "AUTO_DRAW",
-}
-
-export interface Stats {
-  online_players: number;
-  matchmaking: number;
-  games_in_progress: number;
-}
 
 export let GAMES: Game[] = [];
 export const GAME_TIME = 600; // 10 mins in secs
@@ -89,8 +58,7 @@ app.post("/find-match", async (req, res) => {
       console.log(
         `[${new Date().toISOString()}] Player ID ${
           body.playerId
-        } added to the queue.`
-        ,
+        } added to the queue.`,
         gameQueue.queue
       );
     } else {
@@ -129,8 +97,25 @@ app.get("/replay/:id", async (req, res) => {
   }
 });
 
+app.post("/get-username", async (req, res) => {
+  try {
+    const body = req.body;
+    if (body.username in PLAYER_MAP) {
+      res.status(500).json({ message: "Username Taken!" });
+    }
+    else 
+    {
+      res.status(200).json({ username: body.username });
+    }
+  } catch (err: any) {
+    console.error(`[${new Date().toISOString()}] [ERROR]: ${err.message}`);
+    res.status(500).json({ message: "Error on server, try again!" });
+  }
+});
+
 // Socket.IO connection handler
-io.on("connection", (socket) => {
+//this should be the custom socket btw, but puts any for now.
+io.on("connection", (socket:any) => {
   console.log("A user connected:", socket.id);
   STATS.online_players += 1;
 
@@ -141,6 +126,7 @@ io.on("connection", (socket) => {
     console.log(
       `Player ${data.playerId} registered with socket ID ${socket.id}`
     );
+    (socket as CustomSocket).username = data.playerId;
     console.log(PLAYER_MAP);
     io.emit("update-stats", {
       online_players: STATS.online_players,
@@ -149,115 +135,19 @@ io.on("connection", (socket) => {
     });
   });
 
-  // Handle room join event
-  socket.on("join-room", (data: { gameID: string }) => {
-    console.log(`[JOIN REQUEST] ROOMID: ${data.gameID}`);
-    const game: Game = GAMES.find(
-      (game: Game) => game.gameId == data.gameID
-    ) as Game;
-    // console.log(game.players);
-    socket.join(game.gameId);
-
-    // Fire back the welcome event
-    socket.emit("handshake-done", {
-      color: game.players.find((player: Player) => player.socketId == socket.id)
-        ?.color,
-      position: game?.game.fen(),
-    });
-  });
-
-  // GAME EVENTS
-  // Make move
-  socket.on(
-    "make-move",
-    (data: {
-      roomId: string;
-      from: string;
-      to: string;
-      color: string;
-      time: number;
-    }) => {
-      console.log(data);
-      try {
-        const game = GAMES.find((game: Game) => game.gameId == data.roomId);
-        if (data.color != game?.game.turn()) {
-          return;
-        }
-
-        // Push the last fen to the moves array to be used for replay.
-        game.moves.push(game.game.fen());
-
-        const move = game?.game.move({ from: data.from, to: data.to });
-
-        if (move != null) {
-          const newFEN = game?.game.fen();
-
-          // Set the timestamps you got from the player
-          if (game && game.timestamps) {
-            if (data.color == "w") {
-              game.timestamps.whiteTime = data.time;
-            } else {
-              game.timestamps.blackTime = data.time;
-            }
-          }
-
-          // Check for game end conditions
-          if (game.game.isCheckmate()) {
-            io.to(data.roomId).emit("game-over", {
-              result: GAME_END_TYPE.CHECKMATE,
-              winner: data.color,
-            });
-          } else if (game?.game.isStalemate()) {
-            io.to(data.roomId).emit("game-over", {
-              result: GAME_END_TYPE.STALEMATE,
-            });
-          } else if (game?.game.isDraw()) {
-            io.to(data.roomId).emit("game-over", {
-              result: GAME_END_TYPE.AUTO_DRAW,
-            });
-          } else {
-            io.to(data.roomId).emit("position-change", {
-              newFEN,
-              time: game?.timestamps,
-            });
-          }
-        } else {
-          socket.emit("invalid-move");
-        }
-      } catch (err) {
-        console.log(err);
-      }
-    }
-  );
-
-  // Game start
-  socket.on("start-game", (data: { gameId: string }) => {
-    io.to(data.gameId).emit("game-started");
-  });
-
-  // Resign event for the game
-  socket.on("resign", (data: { gameId: string; playerColor: string }) => {
-    console.log(`[REMOVING GAME] GAME ${data.gameId} REMOVED!`);
-    io.to(data.gameId).emit("alert", { type: GAME_END_TYPE.RESIGN });
-  });
-
-  // Draw
-  socket.on("draw", (data: { gameId: string; playerColor: string }) => {
-    const game = GAMES.find((game: Game) => game.gameId == data.gameId);
-    const playerToAsk = game?.players.find(
-      (player: Player) => player.socketId != socket.id
-    )?.socketId as string;
-    io.to(playerToAsk).emit("alert", { type: GAME_END_TYPE.DRAW });
-    socket.on("draw-answer", (data: { answer: boolean }) => {
-      console.log(data);
-      io.to(socket.id).emit("draw-response", data);
-    });
-  });
+  //handle game events
+  handleGame(socket);
 
   // Handle player disconnect
   socket.on("disconnect", () => {
     console.log("User disconnected:", socket.id);
     STATS.online_players -= 1;
+
+    //remove from the PLAYER_MAPS
+    // delete PLAYER_MAP[socket.username];
+    // delete PLAYER_DATA[socket.id];
+
+
     io.emit("update-stats", {
       online_players: STATS.online_players,
       matchmaking: STATS.matchmaking,
